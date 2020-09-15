@@ -290,17 +290,16 @@ cmd_quit(int nargs, char **args)
 }
 
 /*
- * Command for shutting down.
+ * Command for enabling debuging message of DB_THREADS.
  */
 static
 int
-cmd_quit(int nargs, char **args)
+cmd_dth(int nargs, char **args)
 {
 	(void)nargs;
 	(void)args;
 
 	dbflags = DB_THREADS;
-
 	return 0;
 }
 
@@ -563,7 +562,7 @@ static struct {
 	{ "pwd",	cmd_pwd },
 	{ "sync",	cmd_sync },
 	{ "panic",	cmd_panic },
-	{ "dth", cmd_dth},
+	{ "dth",    cmd_dth },
 	{ "q",		cmd_quit },
 	{ "exit",	cmd_quit },
 	{ "halt",	cmd_quit },
