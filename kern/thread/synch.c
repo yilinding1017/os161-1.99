@@ -208,7 +208,6 @@ lock_acquire(struct lock *lock)
                 wchan_sleep(lock->lk_wchan);
                 spinlock_acquire(&(lock->lk_spin));
         }
-        KASSERT(!lock->held);
         lock->held = true;
         lock->owner = curthread;
         spinlock_release(&(lock->lk_spin));
@@ -235,7 +234,12 @@ bool
 lock_do_i_hold(struct lock *lock)
 {
         // Write this
-        return (lock->owner == curthread);
+        KASSERT(lock != NULL);
+
+        spinlock_acquire(&lock->lk_spin);
+        bool do_i_hold = (lock->owner == curthread);
+        spinlock_release(&lock->lk_spin);
+        return do_i_hold;
 }
 
 ////////////////////////////////////////////////////////////
