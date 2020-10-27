@@ -54,6 +54,7 @@ sem_create(const char *name, int initial_count)
         sem = kmalloc(sizeof(struct semaphore));
         if (sem == NULL) {
                 return NULL;
+                
         }
 
         sem->sem_name = kstrdup(name);
@@ -289,6 +290,10 @@ void
 cv_wait(struct cv *cv, struct lock *lock)
 {
         // Write this
+        KASSERT(cv != NULL);
+        KASSERT(lock != NULL);
+        KASSERT(lock_do_i_hold(lock));
+
         wchan_lock(cv->cv_wchan);
         lock_release(lock);
         wchan_sleep(cv->cv_wchan);
@@ -298,6 +303,9 @@ cv_wait(struct cv *cv, struct lock *lock)
 void
 cv_signal(struct cv *cv, struct lock *lock)
 {
+        KASSERT(cv != NULL);
+        KASSERT(lock != NULL);
+        KASSERT(lock_do_i_hold(lock));
         // Write this
         (void) lock;
 	wchan_wakeone(cv->cv_wchan);
@@ -306,6 +314,9 @@ cv_signal(struct cv *cv, struct lock *lock)
 void
 cv_broadcast(struct cv *cv, struct lock *lock)
 {
+        KASSERT(cv != NULL);
+        KASSERT(lock != NULL);
+        KASSERT(lock_do_i_hold(lock));
 	// Write this
         (void) lock;
 	wchan_wakeall(cv->cv_wchan);

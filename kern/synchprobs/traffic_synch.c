@@ -30,7 +30,7 @@ static struct cv* directions[4];
 // Count the number of cars in the interaction right now
 static int countCars = 0;
 // waitQueue shows the order of entry for the waiting directions
-static struct queue *waitQueue; 
+static struct queue *waitQueue;
 static int dirList[4] = {0,1,2,3};
 static bool inWait[4] = {false,false,false,false};
 // entry ranges from -1 to 3. -1 indicates no direction to enter
