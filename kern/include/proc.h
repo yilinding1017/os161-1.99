@@ -38,6 +38,7 @@
 
 #include <spinlock.h>
 #include <thread.h> /* required for struct threadarray */
+#include "opt-A2.h"
 
 struct addrspace;
 struct vnode;
@@ -68,7 +69,21 @@ struct proc {
   struct vnode *console;                /* a vnode for the console device */
 #endif
 
-	/* add more material here as needed */
+/* add more material here as needed */
+#ifdef OPT_A2
+  pid_t pid;
+  int exitCode;
+  bool isExit;
+  struct lock *p_lk;
+  struct cv *p_cv;
+  // pointer to parent process
+  struct proc *p_parent;
+  // pointer to children
+  struct array *p_children;
+
+#endif
+
+	
 };
 
 /* This is the process structure for the kernel and for kernel-only threads. */

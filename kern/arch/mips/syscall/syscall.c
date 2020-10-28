@@ -35,6 +35,7 @@
 #include <thread.h>
 #include <current.h>
 #include <syscall.h>
+#include "opt-A2.h"
 
 
 /*
@@ -120,6 +121,9 @@ syscall(struct trapframe *tf)
 	  /* sys__exit does not return, execution should not get here */
 	  panic("unexpected return from sys__exit");
 	  break;
+	case SYS_fork:
+	  err = sys_fork(tf, (pid_t *)&retval);
+	  break;
 	case SYS_getpid:
 	  err = sys_getpid((pid_t *)&retval);
 	  break;
@@ -177,7 +181,16 @@ syscall(struct trapframe *tf)
  * Thus, you can trash it and do things another way if you prefer.
  */
 void
-enter_forked_process(struct trapframe *tf)
+enter_forked_process(void *tf, unsigned long data)
 {
+	(void) data;
+#if OPT_A2
+  struct trapframe ntf = *(struct trapframe *)tf;
+  ntf.tf_v0 = 0;
+  ntf.tf_a3 = 0;
+  ntf.tf_epc += 4;
+  mips_usermode(&ntf);
+#else
 	(void)tf;
+#endif
 }

@@ -199,7 +199,7 @@ lock_acquire(struct lock *lock)
         KASSERT(lock != NULL);
         KASSERT(!(lock_do_i_hold(lock)));
         //For robustness, always check
-        KASSERT(curthread->t_in_interrupt == false);
+        //KASSERT(curthread->t_in_interrupt == false);
 
 
         spinlock_acquire(&(lock->lk_spin));

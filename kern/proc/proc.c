@@ -1,46 +1,46 @@
-/*
- * Copyright (c) 2013
- *	The President and Fellows of Harvard College.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE UNIVERSITY AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE UNIVERSITY OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- */
+// /*
+//  * Copyright (c) 2013
+//  *	The President and Fellows of Harvard College.
+//  *
+//  * Redistribution and use in source and binary forms, with or without
+//  * modification, are permitted provided that the following conditions
+//  * are met:
+//  * 1. Redistributions of source code must retain the above copyright
+//  *    notice, this list of conditions and the following disclaimer.
+//  * 2. Redistributions in binary form must reproduce the above copyright
+//  *    notice, this list of conditions and the following disclaimer in the
+//  *    documentation and/or other materials provided with the distribution.
+//  * 3. Neither the name of the University nor the names of its contributors
+//  *    may be used to endorse or promote products derived from this software
+//  *    without specific prior written permission.
+//  *
+//  * THIS SOFTWARE IS PROVIDED BY THE UNIVERSITY AND CONTRIBUTORS ``AS IS'' AND
+//  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+//  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+//  * ARE DISCLAIMED.  IN NO EVENT SHALL THE UNIVERSITY OR CONTRIBUTORS BE LIABLE
+//  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+//  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+//  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+//  * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+//  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+//  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+//  * SUCH DAMAGE.
+//  */
 
-/*
- * Process support.
- *
- * There is (intentionally) not much here; you will need to add stuff
- * and maybe change around what's already present.
- *
- * p_lock is intended to be held when manipulating the pointers in the
- * proc structure, not while doing any significant work with the
- * things they point to. Rearrange this (and/or change it to be a
- * regular lock) as needed.
- *
- * Unless you're implementing multithreaded user processes, the only
- * process that will have more than one thread is the kernel process.
- */
+// /*
+//  * Process support.
+//  *
+//  * There is (intentionally) not much here; you will need to add stuff
+//  * and maybe change around what's already present.
+//  *
+//  * p_lock is intended to be held when manipulating the pointers in the
+//  * proc structure, not while doing any significant work with the
+//  * things they point to. Rearrange this (and/or change it to be a
+//  * regular lock) as needed.
+//  *
+//  * Unless you're implementing multithreaded user processes, the only
+//  * process that will have more than one thread is the kernel process.
+//  */
 
 #include <types.h>
 #include <proc.h>
@@ -49,7 +49,8 @@
 #include <vnode.h>
 #include <vfs.h>
 #include <synch.h>
-#include <kern/fcntl.h>  
+#include <kern/fcntl.h>
+#include "opt-A2.h"
 
 /*
  * The process for the kernel; this holds all the kernel-only threads.
@@ -69,6 +70,11 @@ static struct semaphore *proc_count_mutex;
 struct semaphore *no_proc_sem;   
 #endif  // UW
 
+#if OPT_A2
+static struct lock *pid_counter_lock;
+static volatile pid_t pid_counter;
+static bool counter_initialized;
+#endif
 
 
 /*
@@ -78,6 +84,7 @@ static
 struct proc *
 proc_create(const char *name)
 {
+	// KASSERT(pid_counter > 0);
 	struct proc *proc;
 
 	proc = kmalloc(sizeof(*proc));
@@ -102,6 +109,41 @@ proc_create(const char *name)
 #ifdef UW
 	proc->console = NULL;
 #endif // UW
+
+#if OPT_A2
+	if (counter_initialized) {
+		lock_acquire(pid_counter_lock);
+		proc->pid = pid_counter;
+		pid_counter++;
+		lock_release(pid_counter_lock);
+    }
+    else {
+		proc->pid = pid_counter;
+		pid_counter++;
+    }
+
+	proc->exitCode = 0;
+	proc->isExit = false;
+	proc->p_parent = NULL;
+	proc->p_children = array_create();
+	array_init(proc->p_children);
+
+	proc->p_lk = lock_create("p_lk");
+	if(proc->p_lk == NULL){
+		kfree(proc->p_name);
+		kfree(proc);
+		return NULL;
+	}
+
+	proc->p_cv = cv_create("p_cv");
+	if(proc->p_cv == NULL){
+		kfree(proc->p_lk);
+		kfree(proc->p_name);
+		kfree(proc);
+		return NULL;
+	}
+
+#endif // OPT_A2
 
 	return proc;
 }
@@ -166,6 +208,27 @@ proc_destroy(struct proc *proc)
 	threadarray_cleanup(&proc->p_threads);
 	spinlock_cleanup(&proc->p_lock);
 
+#if OPT_A2
+	
+	// remove all zombie children
+	unsigned int childrenNum = array_num(proc->p_children);
+	for(unsigned int i = childrenNum; i > 0; i--){
+		struct proc *child = array_get(proc->p_children,i-1);
+		//KASSERT(child != NULL);
+		array_remove(proc->p_children, i-1);
+		lock_acquire(child->p_lk);
+		bool zombie = child->isExit;
+		child->p_parent = NULL;
+		lock_release(child->p_lk);
+		if(zombie == true) proc_destroy(child);
+	}
+
+	// remove arrays, lock and cv
+	lock_destroy(proc->p_lk);
+	cv_destroy(proc->p_cv);
+	array_destroy(proc->p_children);
+#endif
+
 	kfree(proc->p_name);
 	kfree(proc);
 
@@ -193,10 +256,21 @@ proc_destroy(struct proc *proc)
 void
 proc_bootstrap(void)
 {
+#if OPT_A2
+  counter_initialized = false;
+  pid_counter = 1;
+  pid_counter_lock = lock_create("pid_counter_lock");
+  if (pid_counter_lock == NULL) {
+    panic("could not create pid counter lock\n");
+  }
+#endif // OPT_A2
   kproc = proc_create("[kernel]");
   if (kproc == NULL) {
     panic("proc_create for kproc failed\n");
   }
+#if OPT_A2
+  counter_initialized = true;
+#endif // OPT_A2
 #ifdef UW
   proc_count = 0;
   proc_count_mutex = sem_create("proc_count_mutex",1);
@@ -364,3 +438,5 @@ curproc_setas(struct addrspace *newas)
 	spinlock_release(&proc->p_lock);
 	return oldas;
 }
+
+
