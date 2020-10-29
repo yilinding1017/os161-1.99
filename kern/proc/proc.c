@@ -439,4 +439,3 @@ curproc_setas(struct addrspace *newas)
 	return oldas;
 }
 
-

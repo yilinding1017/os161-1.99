@@ -27,7 +27,10 @@ int sys_fork(struct trapframe *tf, pid_t *retval) {
   }
 
   // Set Parent and Children
-  
+  spinlock_acquire(&curproc->p_lock);
+  child->p_parent = curproc;
+  array_add(curproc->p_children, child, NULL);
+  spinlock_release(&curproc->p_lock);
 
   // Copy address space
   struct addrspace * temp =  NULL;
@@ -39,11 +42,6 @@ int sys_fork(struct trapframe *tf, pid_t *retval) {
   spinlock_acquire(&child->p_lock);
   child->p_addrspace = temp;
   spinlock_release(&child->p_lock);
-
-  spinlock_acquire(&curproc->p_lock);
-  child->p_parent = curproc;
-  array_add(curproc->p_children, child, NULL);
-  spinlock_release(&curproc->p_lock);
 
   // Copy trapframe
   struct trapframe *childTF = kmalloc(sizeof(struct trapframe));
@@ -152,7 +150,6 @@ sys_waitpid(pid_t pid,
      the specified process.   
      In fact, this will return 0 even if the specified process
      is still running, and even if it never existed in the first place.
-
      Fix this!
   */
   *retval = -1;
@@ -167,9 +164,9 @@ sys_waitpid(pid_t pid,
 
   spinlock_acquire(&curproc->p_lock);
   int childrenNum = array_num(curproc->p_children);
-  for(int i = 0; i<childrenNum ;i++) {
-    struct proc *currChild = array_get(curproc->p_children,i);
-    pid_t childPid = child->pid;
+  for(int i = childrenNum; i > 0; i--) {
+    struct proc *currChild = array_get(curproc->p_children,i-1);
+    pid_t childPid = currChild->pid;
     if(childPid == pid) {
       child = currChild;
       break;
@@ -198,9 +195,6 @@ sys_waitpid(pid_t pid,
   *retval = pid;
   return(0);
 }
-
-
-
 
 
 
