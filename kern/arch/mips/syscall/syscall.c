@@ -121,6 +121,9 @@ syscall(struct trapframe *tf)
 	  /* sys__exit does not return, execution should not get here */
 	  panic("unexpected return from sys__exit");
 	  break;
+	case SYS_execv:
+	  err = sys_execv((char *)tf->tf_a0, (char **)tf->tf_a1);
+	  break;
 	case SYS_fork:
 	  err = sys_fork(tf, (pid_t *)&retval);
 	  break;

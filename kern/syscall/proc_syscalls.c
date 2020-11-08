@@ -14,7 +14,156 @@
 #include <synch.h>
 #include <mips/trapframe.h>
 
+#include <copyinout.h>
+#include <vfs.h>
+#include <kern/fcntl.h>
 
+#if OPT_A2
+int sys_execv(const char *program, char **args) {
+  // Count the number of arguments and copy them into the kernel  
+  int argsNum = 0;
+  for (int i = 0; args[i] != NULL; i++) {
+    argsNum++;
+  }
+
+  size_t argsSize = (argsNum + 1) * sizeof(char *);
+  char **argsPath = kmalloc(argsSize);
+  if(argsPath == NULL) {
+    return ENOMEM;
+  }
+
+  for (int i = 0; i <= argsNum; i++) {
+    if (i == argsNum) argsPath[i] = NULL;
+    else {
+      size_t argSize = (strlen(args[i]) + 1) * sizeof(char);
+      argsPath[i] = kmalloc(argSize);
+      if(argsPath[i] == NULL) {
+        int count = 0;
+        while(argsPath[count] != NULL) {
+          kfree(argsPath[count]);
+          ++count;
+        }
+        kfree(argsPath);
+        return ENOMEM;
+      }
+      size_t tempGot;
+      int err = copyinstr((const_userptr_t)args[i], argsPath[i], argSize, &tempGot);
+      if(err != 0) {
+        int count = 0;
+        while(argsPath[count] != NULL) {
+          kfree(argsPath[count]);
+          ++count;
+        }
+        kfree(argsPath);
+        return err;
+      }
+    }
+  }
+
+  // Copy the program path from user space into the kernel
+  size_t programNameSize = (strlen(program) + 1) * sizeof(char);
+  char *programNamePath = kmalloc(programNameSize);
+  if(programNamePath == NULL) {
+    return ENOMEM;
+  }
+  size_t got;
+  int err = copyinstr((const_userptr_t)program, programNamePath, programNameSize, &got);
+  if(err != 0) {
+    kfree(programNamePath);
+    return err;
+  }
+  
+  // Modify runprogram
+  struct addrspace *as;
+	struct vnode *v;
+	vaddr_t entrypoint, stackptr;
+	int result;
+
+	/* Open the file. */
+	result = vfs_open(programNamePath, O_RDONLY, 0, &v);
+	if (result) {
+		return result;
+	}
+
+	/* Create a new address space. */
+	as = as_create();
+	if (as ==NULL) {
+		vfs_close(v);
+		return ENOMEM;
+	}
+
+	/* Switch to it and activate it. */
+	struct addrspace *oldas = curproc_setas(as);
+	as_activate();
+
+	/* Load the executable. */
+	result = load_elf(v, &entrypoint);
+	if (result) {
+		/* p_addrspace will go away when curproc is destroyed */
+    as_destroy(curproc_setas(oldas));
+		vfs_close(v);
+		return result;
+	}
+
+	/* Done with the file now. */
+	vfs_close(v);
+
+	/* Define the user stack in the address space */
+	result = as_define_stack(as, &stackptr);
+	if (result) {
+		/* p_addrspace will go away when curproc is destroyed */
+    as_destroy(curproc_setas(oldas));
+		return result;
+	}
+
+  // Copy the arguments from the user space into the new address space
+  vaddr_t *stackArgs = kmalloc((argsNum+1) * sizeof(vaddr_t));
+
+  size_t totalCharsSize = 0;
+
+  for(int i = argsNum; i >= 0; --i) {
+    if(i == argsNum) {
+      stackArgs[i] = (vaddr_t)NULL;
+    } else {
+      size_t arg_size = (strlen(argsPath[i])+1)*sizeof(char);
+      stackptr -= arg_size;
+      totalCharsSize += arg_size;
+      int err = copyout((void *)argsPath[i],(userptr_t)stackptr, arg_size);
+      if(err != 0) {
+        return err;
+      }
+      stackArgs[i] = stackptr;
+    }
+  }
+
+  size_t diff = ROUNDUP(totalCharsSize,4) - totalCharsSize;
+  stackptr -= diff;
+  
+  for (int i = argsNum; i >= 0; --i) {
+    size_t argPointer_size = sizeof(vaddr_t);
+    stackptr -= argPointer_size;
+    int err = copyout((void *)&stackArgs[i], (userptr_t)stackptr, argPointer_size);
+    if(err != 0) {
+        return err;
+    }
+  }
+
+  /* Warp to user mode. */
+  // Delete the old address space
+  as_destroy(oldas);
+  kfree(programNamePath);
+
+  // Call enter_new_process with 
+  // (1) address to the arguments on the stack 
+  // (2) stack pointer (from as_define_stack) 
+  // (3) program entry point (from vfs_open)
+  enter_new_process(argsNum/*argc*/, (userptr_t)stackptr /*userspace addr of argv*/,
+			  ROUNDUP(stackptr,8), entrypoint);
+
+	/* enter_new_process does not return. */
+	panic("enter_new_process returned\n");
+	return EINVAL;
+}
 
 int sys_fork(struct trapframe *tf, pid_t *retval) {
   struct proc *child = proc_create_runprogram(curproc->p_name);
@@ -64,8 +213,7 @@ int sys_fork(struct trapframe *tf, pid_t *retval) {
 
   return 0;
 }
-
-
+#endif
   /* this implementation of sys__exit does not do anything with the exit code */
   /* this needs to be fixed to get exit() and waitpid() working properly */
 
